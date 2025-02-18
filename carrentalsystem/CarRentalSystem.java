@@ -22,7 +22,7 @@ public class CarRentalSystem {
     }
 
     public void removeStationFromIndex(Station station, CarType type) {
-        stationIndex.computeIfPresent(type, (t, set) -> {
+        stationIndex.computeIfPresent(type, (_, set) -> {
             set.remove(station);
             return set;
         });
