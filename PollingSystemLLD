@@ -1,0 +1,192 @@
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
+class Poll {
+    private final String pollId;
+    private final String question;
+    private final List<String> options;
+    private final Instant createdAt;
+
+    public Poll(String pollId, String question, List<String> options, Instant createdAt) {
+        this.pollId = pollId;
+        this.question = question;
+        this.options = new ArrayList<>(options);
+        this.createdAt = createdAt;
+    }
+
+    public String getPollId() { return pollId; }
+    public String getQuestion() { return question; }
+    public List<String> getOptions() { return new ArrayList<>(options); }
+    public Instant getCreatedAt() { return createdAt; }
+}
+
+class Vote {
+    private final String pollId;
+    private final String userId;
+    private final String option;
+    private final Instant timestamp;
+
+    public Vote(String pollId, String userId, String option, Instant timestamp) {
+        this.pollId = pollId;
+        this.userId = userId;
+        this.option = option;
+        this.timestamp = timestamp;
+    }
+
+    public String getPollId() { return pollId; }
+    public String getUserId() { return userId; }
+    public String getOption() { return option; }
+    public Instant getTimestamp() { return timestamp; }
+}
+
+class PollRepository {
+    private final ConcurrentHashMap<String, Poll> polls = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, ConcurrentHashMap<String, Vote>> votes = new ConcurrentHashMap<>();
+
+    public void addPoll(Poll poll) { polls.put(poll.getPollId(), poll); }
+
+    public Poll getPoll(String pollId) { return polls.get(pollId); }
+
+    public boolean updatePollQuestion(String pollId, String newQuestion) {
+        Poll poll = polls.get(pollId);
+        if (poll == null) return false;
+        Poll updatedPoll = new Poll(pollId, newQuestion, poll.getOptions(), poll.getCreatedAt());
+        polls.put(pollId, updatedPoll);
+        return true;
+    }
+
+    public boolean updatePollOptions(String pollId, List<String> newOptions) {
+        Poll poll = polls.get(pollId);
+        if (poll == null) return false;
+        Poll updatedPoll = new Poll(pollId, poll.getQuestion(), newOptions, poll.getCreatedAt());
+        polls.put(pollId, updatedPoll);
+        return true;
+    }
+
+    public boolean deletePoll(String pollId) {
+        if (polls.remove(pollId) != null) {
+            votes.remove(pollId);
+            return true;
+        }
+        return false;
+    }
+
+    public boolean addVote(Vote vote) {
+        return votes.computeIfAbsent(vote.getPollId(), k -> new ConcurrentHashMap<>())
+                .putIfAbsent(vote.getUserId(), vote) == null;
+    }
+
+    public Map<String, Integer> getVoteCounts(String pollId) {
+        ConcurrentHashMap<String, Vote> pollVotes = votes.get(pollId);
+        Map<String, Integer> counts = new HashMap<>();
+        if (pollVotes != null) {
+            for (Vote vote : pollVotes.values()) {
+                counts.put(vote.getOption(), counts.getOrDefault(vote.getOption(), 0) + 1);
+            }
+        }
+        return counts;
+    }
+}
+
+class PollService {
+    private final PollRepository repository = new PollRepository();
+
+    public Poll createPoll(String question, List<String> options) {
+        String pollId = UUID.randomUUID().toString();
+        Poll poll = new Poll(pollId, question, options, Instant.now());
+        repository.addPoll(poll);
+        return poll;
+    }
+
+    public boolean updatePollQuestion(String pollId, String newQuestion) {
+        return repository.updatePollQuestion(pollId, newQuestion);
+    }
+
+    public boolean updatePollOptions(String pollId, List<String> newOptions) {
+        return repository.updatePollOptions(pollId, newOptions);
+    }
+
+    public boolean deletePoll(String pollId) {
+        return repository.deletePoll(pollId);
+    }
+
+    public String voteInPoll(String pollId, String userId, String option) {
+        Poll poll = repository.getPoll(pollId);
+        if (poll == null) throw new IllegalArgumentException("Poll not found");
+        if (!poll.getOptions().contains(option)) throw new IllegalArgumentException("Invalid option");
+        if (!repository.addVote(new Vote(pollId, userId, option, Instant.now()))) {
+            throw new IllegalStateException("User already voted");
+        }
+        return "Vote cast successfully";
+    }
+
+    public PollResult viewPollResults(String pollId) {
+        Poll poll = repository.getPoll(pollId);
+        if (poll == null) throw new IllegalArgumentException("Poll not found");
+        Map<String, Integer> counts = repository.getVoteCounts(pollId);
+        Map<String, Integer> results = new LinkedHashMap<>();
+        for (String option : poll.getOptions()) {
+            results.put(option, counts.getOrDefault(option, 0));
+        }
+        return new PollResult(pollId, poll.getQuestion(), results);
+    }
+
+    public static class PollResult {
+        private final String pollId;
+        private final String question;
+        private final Map<String, Integer> results;
+
+        public PollResult(String pollId, String question, Map<String, Integer> results) {
+            this.pollId = pollId;
+            this.question = question;
+            this.results = results;
+        }
+
+        public String getPollId() { return pollId; }
+        public String getQuestion() { return question; }
+        public Map<String, Integer> getResults() { return results; }
+    }
+}
+
+// Demonstration
+public class Main {
+    public static void main(String[] args) {
+        PollService service = new PollService();
+
+        // Create Poll
+        Poll poll = service.createPoll("Best Programming Language?", List.of("Java", "Python", "C++"));
+        String pollId = poll.getPollId();
+        System.out.println("Created Poll: " + pollId);
+
+        // Vote
+        System.out.println(service.voteInPoll(pollId, "user1", "Java"));  // Success
+        System.out.println(service.voteInPoll(pollId, "user2", "Python")); // Success
+
+        try {
+            service.voteInPoll(pollId, "user1", "C++"); // Duplicate vote
+        } catch (IllegalStateException e) {
+            System.out.println("Error: " + e.getMessage());
+        }
+
+        // View Results
+        PollService.PollResult results = service.viewPollResults(pollId);
+        System.out.println("\nResults for Poll: " + results.getPollId());
+        System.out.println("Question: " + results.getQuestion());
+        results.getResults().forEach((k, v) -> System.out.println(k + ": " + v));
+
+        // Update Poll
+        service.updatePollQuestion(pollId, "Most Loved Programming Language?");
+        service.updatePollOptions(pollId, List.of("Java", "Python", "JavaScript"));
+        System.out.println("\nUpdated Poll Options.");
+
+        // View Updated Results (votes retained)
+        results = service.viewPollResults(pollId);
+        System.out.println("\nUpdated Results:");
+        results.getResults().forEach((k, v) -> System.out.println(k + ": " + v));
+
+        // Delete Poll
+        service.deletePoll(pollId);
+        System.out.println("\nPoll Deleted.");
+    }
+}
