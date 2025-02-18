@@ -28,8 +28,8 @@ public class Station {
 
     public void addCar(Car car) {
         CarType type = car.getType();
-        availableCars.computeIfAbsent(type, t -> new ConcurrentLinkedDeque<>()).add(car);
-        availableCounts.compute(type, (t, count) -> {
+        availableCars.computeIfAbsent(type, _ -> new ConcurrentLinkedDeque<>()).add(car);
+        availableCounts.compute(type, (_, count) -> {
             if (count == null) {
                 system.addStationToIndex(this, type);
                 return new AtomicInteger(1);
@@ -43,7 +43,7 @@ public class Station {
     public void removeCar(Car car) {
         CarType type = car.getType();
         if (availableCars.getOrDefault(type, new ConcurrentLinkedDeque<>()).remove(car)) {
-            availableCounts.computeIfPresent(type, (t, count) -> {
+            availableCounts.computeIfPresent(type, (_, count) -> {
                 if (count.decrementAndGet() == 0) {
                     system.removeStationFromIndex(this, type);
                 }
